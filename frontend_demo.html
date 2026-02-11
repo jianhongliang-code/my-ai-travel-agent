@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Omni Travel Guide - Live Stream Demo</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f0f2f6;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+        }
+        .card.active {
+            border-left: 5px solid #007bff;
+            transform: translateX(10px);
+        }
+        h1 { color: #333; }
+        .status-badge {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 0.8em;
+            font-weight: bold;
+            color: white;
+            background-color: #6c757d;
+        }
+        .status-processing { background-color: #007bff; }
+        .status-success { background-color: #28a745; }
+        .status-error { background-color: #dc3545; }
+        
+        #log-container {
+            background: #2d2d2d;
+            color: #00ff00;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: monospace;
+            height: 200px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+
+    <h1>🚀 Omni Travel Guide: Agent Stream</h1>
+    <p>点击下方按钮启动 LangGraph 多智能体协作流。</p>
+    
+    <button id="startBtn" onclick="startStream()">开始行程规划 (Start Stream)</button>
+    <div id="status" style="margin-top: 10px; color: #666;"></div>
+
+    <div id="cards-container">
+        <!-- Agent cards will appear here -->
+        <div id="card-planner" class="card" style="opacity: 0.5;">
+            <h3>🗺️ AI Planner (策划师)</h3>
+            <p id="planner-content">等待任务...</p>
+        </div>
+
+        <div id="card-auditor" class="card" style="opacity: 0.5;">
+            <h3>🔍 Auditor (审计员)</h3>
+            <p id="auditor-content">等待行程草案...</p>
+        </div>
+
+        <div id="card-arbiter" class="card" style="opacity: 0.5;">
+            <h3>⚖️ Commercial Arbiter (商业博弈)</h3>
+            <p id="arbiter-content">等待审计结果...</p>
+        </div>
+    </div>
+
+    <h3>实时日志 (SSE Data):</h3>
+    <div id="control-panel" style="margin-top: 20px; display: none;">
+        <div style="background: #fff3cd; color: #856404; padding: 15px; border-radius: 5px; border: 1px solid #ffeeba;">
+            <strong>⚠️ 待审批 (Human-in-the-loop)</strong><br>
+            Commercial Arbiter 需要确认预算策略。
+            <br><br>
+            <button onclick="approveTrip()" style="background: #28a745;">✅ 批准并继续</button>
+        </div>
+    </div>
+    
+    <div id="log-container"></div>
+
+    <script>
+        const userId = "user_" + Math.floor(Math.random() * 10000); // Random user ID for demo
+
+        function log(message) {
+            const container = document.getElementById('log-container');
+            const entry = document.createElement('div');
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function updateCard(id, content, active=true) {
+            const card = document.getElementById(`card-${id}`);
+            const contentEl = document.getElementById(`${id}-content`);
+            if (card && contentEl) {
+                card.style.opacity = '1';
+                if (active) card.classList.add('active');
+                else card.classList.remove('active');
+                
+                // Remove active class from others to show flow
+                document.querySelectorAll('.card').forEach(c => {
+                    if (c.id !== `card-${id}`) c.classList.remove('active');
+                });
+                
+                contentEl.innerHTML = content;
+            }
+        }
+
+        function approveTrip() {
+            log("Sending approval...");
+            document.getElementById('control-panel').style.display = 'none';
+            
+            fetch(`http://localhost:8000/approve-trip/${userId}`, { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    log("Approved! Final State Received.");
+                    console.log(data);
+                    
+                    // Manually update the last card since the stream ended
+                    if (data.final_state && data.final_state.profit_margin) {
+                         updateCard('arbiter', `
+                                <strong>最终决策 (Approved)：</strong><br>
+                                💰 利润率: ${data.final_state.profit_margin}%<br>
+                                🎨 审美分: ${data.final_state.aesthetic_score}
+                            `);
+                         document.getElementById('status').textContent = "规划完成 ✅ (Resumed)";
+                         document.getElementById('startBtn').disabled = false;
+                         document.getElementById('startBtn').textContent = "开始新规划";
+                    }
+                })
+                .catch(err => log("Approval failed: " + err));
+        }
+
+        function startStream() {
+            const btn = document.getElementById('startBtn');
+            btn.disabled = true;
+            btn.textContent = "正在规划中...";
+            document.getElementById('status').textContent = "连接 SSE 流...";
+            document.getElementById('control-panel').style.display = 'none';
+            
+            // Reset UI
+            document.querySelectorAll('.card').forEach(c => {
+                c.style.opacity = '0.5';
+                c.classList.remove('active');
+            });
+            document.getElementById('log-container').innerHTML = '';
+
+            // Connect to FastAPI SSE endpoint
+            const eventSource = new EventSource(`http://localhost:8000/stream-trip/${userId}`);
+
+            eventSource.onopen = () => {
+                log(`Connection opened (Thread ID: ${userId})`);
+                document.getElementById('status').textContent = "流已建立，等待 Agent 响应...";
+            };
+
+            eventSource.onmessage = (event) => {
+                const rawData = event.data;
+                log("Received: " + rawData);
+                
+                try {
+                    const payload = JSON.parse(rawData);
+                    
+                    if (payload.node === 'EOF') {
+                        log("Stream finished.");
+                        eventSource.close();
+                        btn.disabled = false;
+                        btn.textContent = "开始行程规划 (Start Stream)";
+                        document.getElementById('status').textContent = "规划完成 ✅";
+                        return;
+                    }
+                    
+                    if (payload.node === 'human_interrupt') {
+                        log("⏸️ Suspended for Human Input.");
+                        eventSource.close();
+                        document.getElementById('status').textContent = "等待审批 ⏸️";
+                        document.getElementById('control-panel').style.display = 'block';
+                        return;
+                    }
+
+                    // Handle different nodes
+                    switch(payload.node) {
+                        case 'planner':
+                            let listHtml = '<ul>' + payload.data.itinerary.map(i => `<li>${i}</li>`).join('') + '</ul>';
+                            updateCard('planner', `<strong>行程草案生成完毕：</strong>${listHtml}`);
+                            break;
+                            
+                        case 'auditor':
+                            let errorHtml = payload.data.errors.length > 0 
+                                ? `<span style="color:red">⚠️ 发现冲突: ${payload.data.errors.join(', ')}</span>`
+                                : `<span style="color:green">✅ 路线通畅，无风险。</span>`;
+                            updateCard('auditor', errorHtml);
+                            break;
+                            
+                        case 'commercial_arbiter':
+                            updateCard('arbiter', `
+                                <strong>最终决策：</strong><br>
+                                💰 利润率: ${payload.data.profit_margin}%<br>
+                                🎨 审美分: ${payload.data.aesthetic_score}
+                            `);
+                            break;
+                    }
+
+                } catch (e) {
+                    console.error("Error parsing JSON", e);
+                    log("Error parsing JSON: " + e.message);
+                }
+            };
+
+            eventSource.onerror = (err) => {
+                console.error("Stream failed:", err);
+                log("Stream error (check console). Is backend running?");
+                eventSource.close();
+                btn.disabled = false;
+                btn.textContent = "重试";
+                document.getElementById('status').textContent = "连接断开 ❌ (请确保 backend_api.py 已运行)";
+            };
+        }
+    </script>
+</body>
+</html>

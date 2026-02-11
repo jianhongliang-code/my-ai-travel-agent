@@ -1,0 +1,7 @@
+{
+  "name": "Omni Ttravel Guide",
+  "description": "",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
